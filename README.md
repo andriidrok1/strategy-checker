@@ -4,7 +4,7 @@
 
 A web tool that takes natural-language trading strategy descriptions, parses them into executable rules via AI, and runs rigorous backtests with statistical validation — designed to expose curve-fit strategies and trading bullshit, not generate alpha.
 
-**Built by [@andrii](https://github.com/) — 17 yo, Ukrainian, currently learning quant.**
+**Built by [@andriidrok1](https://github.com/andriidrok1) — 17 yo, Ukrainian, currently learning quant.**
 
 ---
 
@@ -12,7 +12,7 @@ A web tool that takes natural-language trading strategy descriptions, parses the
 
 Most trading content on YouTube / Twitter / TikTok shows backtests without proper validation. A strategy "with 95% win rate on SPY 2024" might just be lucky on one period.
 
-This tool runs **four levels of validation automatically:**
+This tool runs **five layers of validation automatically:**
 
 1. **Backtest** with realistic fees + slippage (vectorbt engine)
 2. **Walk-forward (4-fold)** — strategy must work in independent time periods
@@ -20,7 +20,17 @@ This tool runs **four levels of validation automatically:**
 4. **Candle Monte Carlo** — bootstraps 100 synthetic price paths from real returns
 5. **Multi-year out-of-sample** — tests each calendar year independently
 
+Plus a **multi-coin pooled scan**: run one pattern across all crypto at once. A genuine edge survives across many coins — not one lucky pair.
+
 If a strategy fails any of these, you'll see it.
+
+---
+
+## How it flows
+
+1. **Type** a strategy in plain English and pick a symbol + timeframe (Daily / 4h / 1h).
+2. **Analyze** — the AI parses it and shows a **Strategy Blueprint**: the exact rules, direction, entry/exit triggers, stops, and data window that will be tested. No black box — you confirm what runs.
+3. **Confirm** — the engine runs the backtest + all validation layers and returns a verdict card.
 
 ---
 
@@ -28,7 +38,9 @@ If a strategy fails any of these, you'll see it.
 
 - Test classic strategies: golden cross, RSI mean reversion, Bollinger band touches, EMA crossovers
 - Test chart patterns: double top/bottom, head and shoulders, ascending/descending/symmetrical triangles, bullish/bearish flags
-- Compare strategy performance against buy-and-hold benchmark
+- Run on **daily, 4-hour, or hourly** bars (intraday gives far larger trade samples)
+- **Pool a pattern across all 14 crypto symbols** for a statistically meaningful sample + a "real edge or cherry-picked?" verdict
+- Compare strategy performance against a buy-and-hold benchmark
 - Iterate strategies with AI-suggested improvements
 - Generate screenshot-ready verdict cards for content
 
@@ -48,7 +60,7 @@ If a strategy fails any of these, you'll see it.
 ### 1. Clone + install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/strategy-checker.git
+git clone https://github.com/andriidrok1/strategy-checker.git
 cd strategy-checker
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
@@ -73,8 +85,9 @@ python setup_data.py
 This downloads:
 - 5 US ETFs (SPY, QQQ, IWM, GLD, TLT) from Yahoo Finance — 12 years of daily bars
 - 14 crypto pairs from Binance public API — 2 years of daily bars
+- 14 crypto pairs — 2 years of **hourly (1h)** bars into `data/intraday/` (the 4h and 1h app modes resample from this; pooled scan uses it too)
 
-No API keys required for data fetching. Public market data only.
+No API keys required for data fetching. Public market data only. The intraday fetch takes the longest (a few minutes).
 
 ### 4. Run the app
 
@@ -94,13 +107,17 @@ Incrementally updates crypto data to current time. Stocks remain at historical s
 
 ---
 
-## Available symbols
+## Available symbols & timeframes
 
-**Stocks (12 years, daily):** SPY, QQQ, IWM, GLD, TLT
+**Stocks (12 years, daily only):** SPY, QQQ, IWM, GLD, TLT
 
-**Crypto (2 years, daily):** BTC, ETH, SOL, ADA, ARB, ATOM, AVAX, DOGE, DOT, FIL, LINK, NEAR, UNI, XRP
+**Crypto (2 years; daily + intraday):** BTC, ETH, SOL, ADA, ARB, ATOM, AVAX, DOGE, DOT, FIL, LINK, NEAR, UNI, XRP
 
-To add more, edit `setup_data.py` and re-run.
+**Timeframes:** `Daily` · `4h` · `1h`. Intraday (4h/1h) is crypto-only and is resampled on the fly from the stored hourly bars — so daily BTC gives ~775 bars while 4h gives ~4,600 and 1h ~18,500. More bars → more trades → a real sample.
+
+**Pooled scan:** pick `★ ALL CRYPTO (pool)` as the symbol to run one strategy across every crypto pair and pool the trades.
+
+To add more symbols, edit `setup_data.py` and re-run.
 
 ---
 
@@ -108,7 +125,7 @@ To add more, edit `setup_data.py` and re-run.
 
 ```
 strategy-checker/
-├── app.py              # Streamlit UI + result rendering
+├── app.py              # Streamlit UI: blueprint, single-symbol + pooled scan, result rendering
 ├── data.py             # Parquet loader
 ├── backtest.py         # vectorbt engine + indicator/expression evaluation
 ├── metrics.py          # Sharpe, Sortino, drawdown, etc.
@@ -142,7 +159,7 @@ The AI returns structured JSON:
 }
 ```
 
-Then `backtest.py` computes indicators via `pandas-ta`, evaluates expressions in a sandboxed `df.eval()`, and runs the portfolio simulation with vectorbt.
+Before anything runs, the parsed rules are shown back to you as a **Strategy Blueprint** (direction, entry/exit triggers, stops, data window) so you can confirm the AI understood you correctly. Only after you confirm does `backtest.py` compute indicators via `pandas-ta`, evaluate expressions in a sandboxed `df.eval()`, and run the portfolio simulation with vectorbt.
 
 For chart patterns, the parsing returns `{"pattern": {"type": "double_top"}}` and `patterns.py` detects pivots geometrically using `scipy.signal.find_peaks` + custom rules.
 
@@ -178,6 +195,16 @@ Bootstraps log-returns from real data to generate 100 synthetic OHLC price paths
 
 Splits data by calendar year. Tests strategy on each year independently. Reveals regime breakdowns: many strategies work in 2024 (bull market) but blow up in 2022 (bear).
 
+### Multi-coin pooled scan
+
+Pick `★ ALL CRYPTO (pool)` as the symbol. The same strategy runs independently on every crypto pair and all trades are pooled into one sample. The verdict is based on **breadth, not luck**:
+
+- average return per trade ≤ 0 → **NO EDGE** (the pattern loses on average)
+- positive but profitable on < half the coins → **CHERRY-PICKED** (worked on a few, failed on most)
+- positive *and* profitable across most coins with ≥ 30 trades → **POSSIBLE EDGE**
+
+This is the most communicable check: a real edge shows up across many markets, not one.
+
 ### Iteration loop
 
 After seeing results, click "ITERATE" to have the AI propose ONE specific improvement (tighter threshold, add filter, etc). Auto-fills new strategy text and re-runs.
@@ -189,7 +216,8 @@ After seeing results, click "ITERATE" to have the AI propose ONE specific improv
 - **Indicator-based and pattern-based only** — discretionary "smart money" strategies can't be tested
 - **`df.eval` doesn't support transition events** — "EMA9 crosses above EMA21" is interpreted as regime (`>`) not single bar transition
 - **No live trading** — backtest only
-- **No multi-timeframe rules** — single timeframe per strategy
+- **One timeframe per strategy** — you pick Daily/4h/1h, but a single strategy can't mix timeframes (no MTF rules)
+- **Intraday is crypto-only** — stocks are daily-bar only
 - **Generic fees (0.10%) + slippage (0.05%)** — not per-market specific
 
 ---

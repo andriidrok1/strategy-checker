@@ -14,7 +14,13 @@ import pandas as pd
 
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data"
+INTRADAY_DIR = DATA_DIR / "intraday"
 DATA_DIR.mkdir(exist_ok=True)
+INTRADAY_DIR.mkdir(exist_ok=True)
+
+# Base resolution stored in data/intraday/. The app resamples 1h/4h from this on the fly.
+INTRADAY_TIMEFRAME = "1h"
+INTRADAY_LOOKBACK_DAYS = 730
 
 STOCKS = ["SPY", "QQQ", "IWM", "GLD", "TLT"]
 STOCK_START = "2012-09-06"
@@ -107,13 +113,66 @@ def fetch_cryptos():
         print(f"    ✓ {len(df)} bars ({df.index[0].date()} → {df.index[-1].date()})  → {out.name}")
 
 
+def fetch_cryptos_intraday():
+    """Download intraday (1h) crypto OHLCV via ccxt for the 4h/1h + pooled modes.
+
+    Stored in data/intraday/. The app resamples 4h from this and serves 1h directly.
+    """
+    try:
+        import ccxt
+    except ImportError:
+        print("  ⚠ ccxt not installed. Run: pip install ccxt")
+        return
+
+    binance = ccxt.binance()
+    now_ms = int(time.time() * 1000)
+    since_start = now_ms - INTRADAY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
+    bar_ms = 60 * 60 * 1000  # 1h
+
+    for sym, market in CRYPTOS.items():
+        out = INTRADAY_DIR / f"{sym}.parquet"
+        if out.exists():
+            print(f"  ↺ {sym}: exists, skip (delete file to re-fetch)")
+            continue
+        print(f"  → {sym} ({market}): fetching ~{INTRADAY_LOOKBACK_DAYS}d of {INTRADAY_TIMEFRAME} ...")
+        all_bars = []
+        cur = since_start
+        while cur < now_ms:
+            try:
+                batch = binance.fetch_ohlcv(market, timeframe=INTRADAY_TIMEFRAME, since=cur, limit=1000)
+            except Exception as e:
+                print(f"    ⚠ {e}")
+                break
+            if not batch:
+                break
+            all_bars.extend(batch)
+            last_ts = batch[-1][0]
+            if last_ts <= cur:
+                break
+            cur = last_ts + bar_ms
+            time.sleep(0.15)
+
+        if not all_bars:
+            print(f"    ⚠ no data")
+            continue
+        df = pd.DataFrame(all_bars, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df = df.set_index("timestamp")
+        df.index.name = "date"
+        df = df[~df.index.duplicated(keep="first")]
+        df.to_parquet(out)
+        print(f"    ✓ {len(df)} bars ({df.index[0]} → {df.index[-1]})  → intraday/{out.name}")
+
+
 def main():
     print(f"=== Strategy Checker · data setup ===\n")
-    print("Fetching stocks (Yahoo Finance)...")
+    print("Fetching stocks (Yahoo Finance, daily)...")
     fetch_stocks()
-    print("\nFetching crypto (Binance public API)...")
+    print("\nFetching crypto (Binance public API, daily)...")
     fetch_cryptos()
-    print(f"\nDone. Files in {DATA_DIR}/\n")
+    print("\nFetching crypto intraday (Binance public API, 1h — for 4h/1h + pooled modes)...")
+    fetch_cryptos_intraday()
+    print(f"\nDone. Files in {DATA_DIR}/ and {INTRADAY_DIR}/\n")
     print("Next: `streamlit run app.py`")
 
 
