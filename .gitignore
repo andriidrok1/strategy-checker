@@ -1,0 +1,25 @@
+# Secrets
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+*.log
+
+# Data files (users fetch their own via `python setup.py`)
+data/
+!data/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Streamlit
+.streamlit/cache/
